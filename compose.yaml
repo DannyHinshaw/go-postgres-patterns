@@ -1,0 +1,80 @@
+services:
+  zoned_worker:
+    container_name: zoned_worker
+    image: img/zoned-worker
+    build:
+      context: .
+      dockerfile: ./build/docs/Dockerfile
+    command: air -c build/docs/.air.toml
+    restart: unless-stopped
+    depends_on:
+      - migrate
+    ports:
+      - "666:666"
+    volumes:
+      - $GOPATH/pkg/mod:/go/pkg/mod
+      - ./:/service
+    env_file:
+      - ./build/.env
+
+  db_utc:
+    container_name: db_utc
+    image: postgres:13.0
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready", "-U", "postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    ports:
+      - "7654:5432"
+    environment:
+      TZ: "GMT"
+      PGTZ: "GMT"
+      POSTGRES_PASSWORD: "password"
+    command: ["postgres", "-c", "log_statement=all"]
+
+  db_east:
+    container_name: db_east
+    image: postgres:13.0
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready", "-U", "postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    ports:
+      - "6543:5432"
+    environment:
+      TZ: "GMT-4"
+      PGTZ: "GMT-4"
+      POSTGRES_PASSWORD: "password"
+    command: ["postgres", "-c", "log_statement=all"]
+
+  migrate:
+    container_name: migrate
+    image: img/migrate
+    build:
+      context: .
+      dockerfile: ./build/migrate/Dockerfile
+    command: air -c build/docs/.air.toml
+    restart: on-failure
+    depends_on:
+      db_utc:
+        condition: service_healthy
+      db_east:
+        condition: service_healthy
+    volumes:
+      - ./migrations:/migrations
+    env_file:
+      - ./build/.env
+
+  tool:
+    container_name: tool
+    image: img/tool
+    build:
+      context: .
+      dockerfile: ./build/tool/Dockerfile
+    volumes:
+      - ./internal:/internal
+      - ./migrations:/migrations
